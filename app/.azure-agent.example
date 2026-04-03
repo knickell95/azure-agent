@@ -1,5 +1,7 @@
-# Copy this file to .env and fill in your values.
+# Copy this file to .azure-agent and fill in your values.
 # DefaultAzureCredential will also pick up az CLI login, managed identity, etc.
+# When running in Docker, az CLI login is supported via the ~/.azure volume mount
+# in docker-compose.yml. A service principal can also be used instead.
 
 # Optional: explicitly set a service principal
 # AZURE_TENANT_ID=

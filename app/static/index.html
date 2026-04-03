@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure Agent</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --accent: #1f6feb;
+            --user-bg: #1c2d4a;
+            --agent-bg: #161b22;
+            --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        html, body { height: 100%; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 14px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        header h1 .icon {
+            width: 24px;
+            height: 24px;
+            background: var(--accent);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3fb950;
+            margin-left: 4px;
+        }
+        .status-dot.disconnected { background: #f85149; }
+
+        button.reset {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 5px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: var(--font);
+            transition: border-color 0.15s, color 0.15s;
+        }
+        button.reset:hover {
+            border-color: var(--text-muted);
+            color: var(--text);
+        }
+
+        #messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            scroll-behavior: smooth;
+        }
+
+        #messages::-webkit-scrollbar { width: 6px; }
+        #messages::-webkit-scrollbar-track { background: transparent; }
+        #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            align-items: flex-end;
+        }
+
+        .message.agent {
+            align-self: flex-start;
+            align-items: flex-start;
+        }
+
+        .message-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .message-bubble {
+            padding: 10px 14px;
+            border-radius: 8px;
+            line-height: 1.6;
+            word-break: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: var(--user-bg);
+            border: 1px solid #1f3d6b;
+            color: #a8d4ff;
+            white-space: pre-wrap;
+        }
+
+        .message.agent .message-bubble {
+            background: var(--agent-bg);
+            border: 1px solid var(--border);
+        }
+
+        /* Markdown styles */
+        .message.agent .message-bubble p { margin-bottom: 8px; }
+        .message.agent .message-bubble p:last-child { margin-bottom: 0; }
+        .message.agent .message-bubble h1,
+        .message.agent .message-bubble h2,
+        .message.agent .message-bubble h3 {
+            margin: 12px 0 6px;
+            font-weight: 600;
+        }
+        .message.agent .message-bubble h1:first-child,
+        .message.agent .message-bubble h2:first-child,
+        .message.agent .message-bubble h3:first-child { margin-top: 0; }
+        .message.agent .message-bubble h1 { font-size: 18px; }
+        .message.agent .message-bubble h2 { font-size: 16px; }
+        .message.agent .message-bubble h3 { font-size: 14px; }
+        .message.agent .message-bubble ul,
+        .message.agent .message-bubble ol {
+            padding-left: 20px;
+            margin-bottom: 8px;
+        }
+        .message.agent .message-bubble li { margin-bottom: 3px; }
+        .message.agent .message-bubble code {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-family: var(--mono);
+            font-size: 12px;
+        }
+        .message.agent .message-bubble pre {
+            background: #0d1117;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            overflow-x: auto;
+            margin-bottom: 8px;
+        }
+        .message.agent .message-bubble pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            font-size: 13px;
+        }
+        .message.agent .message-bubble table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .message.agent .message-bubble th,
+        .message.agent .message-bubble td {
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            text-align: left;
+        }
+        .message.agent .message-bubble th {
+            background: #21262d;
+            font-weight: 600;
+        }
+        .message.agent .message-bubble tr:nth-child(even) td { background: #0d1117; }
+        .message.agent .message-bubble strong { color: #e6edf3; }
+        .message.agent .message-bubble blockquote {
+            border-left: 3px solid var(--border);
+            padding-left: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        /* Typing indicator */
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            padding: 4px 0;
+        }
+        .typing-indicator span {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            animation: bounce 1.2s infinite;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+            30% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        #input-area {
+            border-top: 1px solid var(--border);
+            padding: 16px 20px;
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            max-width: 860px;
+            margin: 0 auto;
+        }
+
+        textarea {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 14px;
+            padding: 10px 14px;
+            resize: none;
+            outline: none;
+            min-height: 44px;
+            max-height: 200px;
+            line-height: 1.5;
+            transition: border-color 0.15s;
+        }
+        textarea:focus { border-color: var(--accent); }
+        textarea::placeholder { color: var(--text-muted); }
+        textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        button.send {
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-family: var(--font);
+            font-size: 14px;
+            font-weight: 500;
+            padding: 10px 18px;
+            height: 44px;
+            flex-shrink: 0;
+            transition: background 0.15s, opacity 0.15s;
+        }
+        button.send:hover:not(:disabled) { background: #388bfd; }
+        button.send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .hint {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <span class="icon">☁</span>
+            Azure Agent
+            <span class="status-dot disconnected" id="status-dot" title="Connecting…"></span>
+        </h1>
+        <button class="reset" id="reset-btn">Reset conversation</button>
+    </header>
+
+    <div id="messages"></div>
+
+    <div id="input-area">
+        <div class="input-row">
+            <textarea
+                id="input"
+                placeholder="Ask about your Azure resources…"
+                rows="1"
+                disabled
+            ></textarea>
+            <button class="send" id="send-btn" disabled>Send</button>
+        </div>
+        <div class="hint">Enter to send · Shift+Enter for new line</div>
+    </div>
+
+    <script>
+        marked.setOptions({ breaks: true, gfm: true });
+
+        const messagesEl = document.getElementById('messages');
+        const inputEl    = document.getElementById('input');
+        const sendBtn    = document.getElementById('send-btn');
+        const resetBtn   = document.getElementById('reset-btn');
+        const statusDot  = document.getElementById('status-dot');
+
+        let ws      = null;
+        let waiting = false;
+
+        function connect() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+            ws.onopen = () => {
+                statusDot.classList.remove('disconnected');
+                statusDot.title = 'Connected';
+                setInputEnabled(true);
+                inputEl.focus();
+            };
+
+            ws.onclose = () => {
+                statusDot.classList.add('disconnected');
+                statusDot.title = 'Disconnected — reconnecting…';
+                setInputEnabled(false);
+                setTimeout(connect, 2000);
+            };
+
+            ws.onerror = () => ws.close();
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                removeTypingIndicator();
+                waiting = false;
+                setInputEnabled(true);
+                inputEl.focus();
+
+                if (data.type === 'reset') {
+                    messagesEl.innerHTML = '';
+                    return;
+                }
+                if (data.type === 'message') {
+                    appendMessage('agent', data.content);
+                }
+            };
+        }
+
+        function appendMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+
+            const label = document.createElement('div');
+            label.className = 'message-label';
+            label.textContent = role === 'user' ? 'You' : 'Azure Agent';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+
+            if (role === 'agent') {
+                bubble.innerHTML = marked.parse(text);
+            } else {
+                bubble.textContent = text;
+            }
+
+            div.appendChild(label);
+            div.appendChild(bubble);
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function showTypingIndicator() {
+            const div = document.createElement('div');
+            div.className = 'message agent';
+            div.id = 'typing';
+
+            const label = document.createElement('div');
+            label.className = 'message-label';
+            label.textContent = 'Azure Agent';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+            div.appendChild(label);
+            div.appendChild(bubble);
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const el = document.getElementById('typing');
+            if (el) el.remove();
+        }
+
+        function setInputEnabled(enabled) {
+            if (waiting && enabled) return;
+            inputEl.disabled = !enabled;
+            sendBtn.disabled = !enabled;
+        }
+
+        function sendMessage() {
+            const text = inputEl.value.trim();
+            if (!text || waiting || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            appendMessage('user', text);
+            ws.send(text);
+            inputEl.value = '';
+            autoResize();
+            waiting = true;
+            setInputEnabled(false);
+            showTypingIndicator();
+        }
+
+        function autoResize() {
+            inputEl.style.height = 'auto';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+        }
+
+        inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        inputEl.addEventListener('input', autoResize);
+        sendBtn.addEventListener('click', sendMessage);
+
+        resetBtn.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send('reset');
+            }
+        });
+
+        connect();
+    </script>
+</body>
+</html>

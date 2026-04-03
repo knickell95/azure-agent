@@ -1,0 +1,10 @@
+services:
+  azure-agent:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - AZURE_CONFIG_DIR=/azure-config
+    volumes:
+      - ./app/.azure-agent:/app/.azure-agent:ro
+      - ${HOME}/.azure:/azure-config
