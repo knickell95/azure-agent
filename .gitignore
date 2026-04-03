@@ -143,6 +143,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+app/.azure-agent
 
 # Spyder project settings
 .spyderproject
