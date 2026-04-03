@@ -8,6 +8,12 @@
 # AZURE_CLIENT_ID=
 # AZURE_CLIENT_SECRET=
 
+# Optional: use managed identity instead of az CLI or service principal
+# For system-assigned managed identity:
+# AZURE_USE_MANAGED_IDENTITY=true
+# For user-assigned managed identity (specify the client ID of the identity):
+# AZURE_MANAGED_IDENTITY_CLIENT_ID=
+
 # Optional: set a default subscription so the agent doesn't have to ask every time
 # AZURE_DEFAULT_SUBSCRIPTION_ID=
 

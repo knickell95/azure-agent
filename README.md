@@ -178,7 +178,7 @@ Before executing any destructive operation — deleting resources, stopping VMs,
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 - An [Anthropic API key](https://console.anthropic.com/)
-- Azure credentials — either `az login` (recommended) or a service principal
+- Azure credentials — `az login`, a service principal, or a managed identity
 
 ### Setup
 
@@ -208,12 +208,22 @@ The recommended approach is to log in with the Azure CLI on your host. Your cred
 az login
 ```
 
-Alternatively, you can use a service principal by setting these variables in `app/.azure-agent`:
+Alternatively, authenticate using a **service principal**:
 
 ```
 AZURE_TENANT_ID=...
 AZURE_CLIENT_ID=...
 AZURE_CLIENT_SECRET=...
+```
+
+Or use a **managed identity** when running on an Azure resource (VM, Container App, etc.):
+
+```
+# System-assigned
+AZURE_USE_MANAGED_IDENTITY=true
+
+# User-assigned (set the client ID of the identity)
+AZURE_MANAGED_IDENTITY_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 **3. Build and run**
