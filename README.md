@@ -46,10 +46,13 @@ Manage virtual network infrastructure and inspect security configuration.
 - Delete a VNet (destructive — requires confirmation)
 - List network security groups (NSGs) in a resource group
 - List and inspect all security rules within an NSG, sorted by priority
+- Create an NSG
+- Delete an NSG (destructive — requires confirmation)
+- Create or update a security rule on an NSG (priority, direction, access, protocol, source/destination address and port)
+- Delete a security rule from an NSG (destructive — requires confirmation)
 - List public IP addresses in a resource group (including SKU and allocation method)
 
 **Not supported:**
-- Creating, modifying, or deleting NSGs or individual security rules
 - Managing subnets independently
 - Route tables, load balancers, application gateways, VPN gateways, or DNS zones
 - VNet peering or private endpoints
@@ -116,7 +119,7 @@ Comprehensive policy management covering the full lifecycle from definition to c
 - List and inspect policy initiatives (policy sets), including their constituent policies
 - List policy assignments at subscription or resource group scope
 - Get details of a specific assignment
-- Create a policy assignment at any ARM scope, with optional `DoNotEnforce` mode for audit-only evaluation
+- Create a policy assignment at any ARM scope, with optional `DoNotEnforce` mode for audit-only evaluation; supports attaching a system-assigned or user-assigned managed identity (required for `deployIfNotExists` and `modify` policy effects)
 - Delete a policy assignment (destructive — requires confirmation)
 - Get a compliance summary showing non-compliant resource and policy counts
 - List non-compliant resources, optionally filtered by policy assignment
@@ -128,6 +131,42 @@ Comprehensive policy management covering the full lifecycle from definition to c
 - Exemptions
 - Management group scope
 - Triggering an on-demand compliance scan
+
+### Managed Identities
+
+Create and manage user-assigned managed identities.
+
+**Supported:**
+- List all user-assigned managed identities in a resource group
+- Get full details of an identity — resource ID, client ID, principal ID, and tenant ID
+- Create a user-assigned managed identity
+- Update tags on an identity
+- Delete an identity (destructive — requires confirmation)
+- List all Azure resources currently using an identity (useful before deleting)
+
+**Not supported:**
+- System-assigned managed identities (these are managed through the resource they are attached to, e.g. a VM or Container App)
+- Federated identity credentials
+
+**Required role:** `Managed Identity Contributor` for write and delete operations; `Managed Identity Operator` to read and assign existing identities to resources.
+
+### Azure Monitor — Diagnostic Settings
+
+Configure and manage diagnostic settings on any Azure resource to route logs and metrics to a destination of your choice.
+
+**Supported:**
+- List all diagnostic settings on a resource (destination summary, log and metric category counts)
+- Get full details of a diagnostic setting (all log/metric categories, enabled state, retention policy, destinations)
+- Create or update a diagnostic setting — supports Log Analytics workspace, storage account, and Event Hub destinations; enable all log categories at once with `allLogs` or specify individual categories; configurable per-destination retention
+- Delete a diagnostic setting (destructive — requires confirmation)
+
+**Not supported:**
+- Querying log data or running Log Analytics queries
+- Managing Log Analytics workspaces or Event Hub namespaces
+- Activity log export settings (subscription-level diagnostic settings)
+- Azure Monitor alerts, action groups, or metric alert rules
+
+**Required role:** `Monitoring Contributor` for write operations; `Monitoring Reader` for read-only operations.
 
 ### Microsoft Entra ID
 
@@ -163,6 +202,43 @@ Read-only visibility into your Entra ID (Azure AD) tenant. All Entra operations 
 - List members of a specific directory role
 
 Entra ID access requires either the **Global Reader** directory role (for interactive user accounts) or Graph API application permissions (`User.Read.All`, `Group.Read.All`, `Application.Read.All`, `Device.Read.All`, `RoleManagement.Read.Directory`) for service principals. See [app/ENTRA_SETUP.md](app/ENTRA_SETUP.md) for setup instructions.
+
+---
+
+## Required Azure Permissions
+
+The agent uses whichever credentials are configured in `.azure-agent` (az CLI login, service principal, or managed identity). The minimum Azure RBAC roles required depend on which operations you intend to perform.
+
+**Reader** at subscription scope is sufficient for all listing and inspection operations across every service area. Write and destructive operations require the additional roles shown below.
+
+| Service area | Read-only operations | Write / destructive operations |
+|---|---|---|
+| Resource Management | Reader | Contributor |
+| Virtual Machines | Reader | Virtual Machine Contributor ¹ |
+| Networking | Reader | Network Contributor |
+| Storage | Reader | Storage Account Contributor |
+| AKS | Reader | Azure Kubernetes Service Contributor Role |
+| RBAC | Reader | User Access Administrator |
+| Policy | Reader | Resource Policy Contributor ² |
+| Managed Identities | Managed Identity Operator | Managed Identity Contributor |
+| Azure Monitor | Monitoring Reader | Monitoring Contributor |
+| Entra ID | Global Reader (directory role) ³ | — (read-only) |
+
+**¹ Virtual Machine Contributor + Network Contributor** — VM creation automatically provisions a VNet and NIC when none are provided, which requires network write permissions in addition to the VM Contributor role. If networking resources already exist, Virtual Machine Contributor alone is sufficient.
+
+**² Resource Policy Contributor** covers creating and deleting policy definitions, initiatives, and assignments, and creating remediation tasks. Viewing compliance results and evaluation events requires only Reader.
+
+**³ Entra ID** uses the Microsoft Graph API rather than ARM. Interactive user accounts need the **Global Reader** directory role. Service principals need the Graph API application permissions `User.Read.All`, `Group.Read.All`, `Application.Read.All`, `Device.Read.All`, and `RoleManagement.Read.Directory`. See [app/ENTRA_SETUP.md](app/ENTRA_SETUP.md) for setup instructions.
+
+### Simplified role assignment
+
+If you prefer to assign a single role rather than per-service roles:
+
+- **Contributor** at subscription scope covers all write operations except RBAC role assignments.
+- **Contributor + User Access Administrator** covers everything except Entra ID.
+- **Owner** at subscription scope covers all ARM operations including role assignments, but grants broader permissions than necessary for most use cases.
+
+Roles can be assigned at subscription scope (access to all resource groups) or narrowed to a specific resource group scope (restricts the agent to that resource group only).
 
 ---
 

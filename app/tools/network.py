@@ -62,6 +62,75 @@ def _get_nsg_rules(subscription_id: str, resource_group: str, nsg_name: str) -> 
     return "\n".join(lines)
 
 
+def _create_nsg(
+    subscription_id: str,
+    resource_group: str,
+    nsg_name: str,
+    location: str,
+) -> str:
+    nsg = _client(subscription_id).network_security_groups.begin_create_or_update(
+        resource_group,
+        nsg_name,
+        {"location": location},
+    ).result()
+    return f"NSG '{nsg.name}' created in '{resource_group}' ({nsg.location})."
+
+
+def _delete_nsg(subscription_id: str, resource_group: str, nsg_name: str) -> str:
+    _client(subscription_id).network_security_groups.begin_delete(resource_group, nsg_name).result()
+    return f"NSG '{nsg_name}' has been deleted."
+
+
+def _create_nsg_rule(
+    subscription_id: str,
+    resource_group: str,
+    nsg_name: str,
+    rule_name: str,
+    priority: int,
+    direction: str,
+    access: str,
+    protocol: str,
+    source_address_prefix: str,
+    source_port_range: str,
+    destination_address_prefix: str,
+    destination_port_range: str,
+    description: str = "",
+) -> str:
+    rule = _client(subscription_id).security_rules.begin_create_or_update(
+        resource_group,
+        nsg_name,
+        rule_name,
+        {
+            "priority": priority,
+            "direction": direction,
+            "access": access,
+            "protocol": protocol,
+            "source_address_prefix": source_address_prefix,
+            "source_port_range": source_port_range,
+            "destination_address_prefix": destination_address_prefix,
+            "destination_port_range": destination_port_range,
+            "description": description,
+        },
+    ).result()
+    return (
+        f"Rule '{rule.name}' {'updated' if description == '' and rule.description == '' else 'saved'} "
+        f"on NSG '{nsg_name}': [{rule.priority}] {rule.direction} {rule.access} "
+        f"proto={rule.protocol} "
+        f"src={rule.source_address_prefix}:{rule.source_port_range} "
+        f"dst={rule.destination_address_prefix}:{rule.destination_port_range}"
+    )
+
+
+def _delete_nsg_rule(
+    subscription_id: str,
+    resource_group: str,
+    nsg_name: str,
+    rule_name: str,
+) -> str:
+    _client(subscription_id).security_rules.begin_delete(resource_group, nsg_name, rule_name).result()
+    return f"Security rule '{rule_name}' has been deleted from NSG '{nsg_name}'."
+
+
 def _list_public_ips(subscription_id: str, resource_group: str) -> str:
     ips = list(_client(subscription_id).public_ip_addresses.list(resource_group))
     if not ips:
@@ -116,6 +185,85 @@ TOOLS = [
             "required": ["subscription_id", "resource_group", "vnet_name"],
         },
         func=_delete_vnet,
+        destructive=True,
+    ),
+    Tool(
+        name="create_network_security_group",
+        description="Create a new network security group (NSG) in a resource group.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "subscription_id": {"type": "string"},
+                "resource_group": {"type": "string"},
+                "nsg_name": {"type": "string"},
+                "location": {"type": "string", "description": "Azure region, e.g. eastus."},
+            },
+            "required": ["subscription_id", "resource_group", "nsg_name", "location"],
+        },
+        func=_create_nsg,
+    ),
+    Tool(
+        name="delete_network_security_group",
+        description="Permanently delete a network security group (NSG) and all its rules.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "subscription_id": {"type": "string"},
+                "resource_group": {"type": "string"},
+                "nsg_name": {"type": "string"},
+            },
+            "required": ["subscription_id", "resource_group", "nsg_name"],
+        },
+        func=_delete_nsg,
+        destructive=True,
+    ),
+    Tool(
+        name="create_or_update_nsg_rule",
+        description=(
+            "Create a new security rule on an NSG, or update an existing one by rule name. "
+            "Priority must be unique within the NSG (100–4096; lower number = higher priority). "
+            "Use '*' for protocol, port range, or address prefix to match all values."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "subscription_id": {"type": "string"},
+                "resource_group": {"type": "string"},
+                "nsg_name": {"type": "string"},
+                "rule_name": {"type": "string"},
+                "priority": {"type": "integer", "description": "Unique priority 100–4096; lower = evaluated first."},
+                "direction": {"type": "string", "enum": ["Inbound", "Outbound"]},
+                "access": {"type": "string", "enum": ["Allow", "Deny"]},
+                "protocol": {"type": "string", "enum": ["Tcp", "Udp", "Icmp", "*"]},
+                "source_address_prefix": {"type": "string", "description": "CIDR, service tag (e.g. Internet, VirtualNetwork), or *."},
+                "source_port_range": {"type": "string", "description": "Port, range (e.g. 1024-65535), or *."},
+                "destination_address_prefix": {"type": "string", "description": "CIDR, service tag, or *."},
+                "destination_port_range": {"type": "string", "description": "Port, range, or *."},
+                "description": {"type": "string", "description": "Optional human-readable description of the rule."},
+            },
+            "required": [
+                "subscription_id", "resource_group", "nsg_name", "rule_name",
+                "priority", "direction", "access", "protocol",
+                "source_address_prefix", "source_port_range",
+                "destination_address_prefix", "destination_port_range",
+            ],
+        },
+        func=_create_nsg_rule,
+    ),
+    Tool(
+        name="delete_nsg_rule",
+        description="Delete a specific security rule from an NSG by name.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "subscription_id": {"type": "string"},
+                "resource_group": {"type": "string"},
+                "nsg_name": {"type": "string"},
+                "rule_name": {"type": "string"},
+            },
+            "required": ["subscription_id", "resource_group", "nsg_name", "rule_name"],
+        },
+        func=_delete_nsg_rule,
         destructive=True,
     ),
     Tool(

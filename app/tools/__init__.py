@@ -7,6 +7,8 @@ from tools.aks import TOOLS as _AKS_TOOLS
 from tools.identity import TOOLS as _IDENTITY_TOOLS
 from tools.policy import TOOLS as _POLICY_TOOLS
 from tools.entra import TOOLS as _ENTRA_TOOLS
+from tools.monitor import TOOLS as _MONITOR_TOOLS
+from tools.managed_identity import TOOLS as _MANAGED_IDENTITY_TOOLS
 
 # ---------------------------------------------------------------------------
 # Tool groups — each value is a list of Tool objects for one service domain.
@@ -25,6 +27,8 @@ TOOL_GROUPS: dict[str, list] = {
     "identity": _IDENTITY_TOOLS,
     "policy":   _POLICY_TOOLS,
     "entra":    _ENTRA_TOOLS,
+    "monitor":          _MONITOR_TOOLS,
+    "managed_identity": _MANAGED_IDENTITY_TOOLS,
 }
 
 # Short descriptions used by the Haiku classifier to pick groups.
@@ -36,6 +40,8 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "identity": "RBAC, role assignments, role definitions, Azure permissions",
     "policy":   "Azure Policy, policy definitions, initiatives, assignments, compliance, remediation",
     "entra":    "Entra ID, Azure AD, users, groups, app registrations, service principals, devices, directory roles",
+    "monitor":          "Azure Monitor, diagnostic settings, logs, metrics, Log Analytics workspace, Event Hub",
+    "managed_identity": "managed identity, user-assigned identity, MSI, service identity, principal ID, client ID",
 }
 
 # Complete flat list and registry — used for tool execution lookup regardless

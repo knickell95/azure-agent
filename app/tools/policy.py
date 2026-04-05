@@ -249,11 +249,20 @@ def _create_policy_assignment(
     enforcement_mode: str = "Default",
     description: str = "",
     parameters_json: str = "{}",
+    identity_type: str = "None",
+    user_assigned_identity_id: str = "",
+    location: str = "",
 ) -> str:
     try:
         parameters = json.loads(parameters_json)
     except json.JSONDecodeError as exc:
         return f"Invalid JSON in parameters: {exc}"
+
+    if identity_type != "None" and not location:
+        return "[Error] A location is required when assigning a managed identity to a policy assignment."
+
+    if identity_type == "UserAssigned" and not user_assigned_identity_id:
+        return "[Error] user_assigned_identity_id is required when identity_type is 'UserAssigned'."
 
     url = f"{_ARM_BASE}{scope}/providers/Microsoft.Authorization/policyAssignments/{assignment_name}?api-version={_ASSIGNMENT_API}"
     body = {
@@ -266,13 +275,32 @@ def _create_policy_assignment(
             "parameters": parameters,
         }
     }
+
+    if identity_type == "SystemAssigned":
+        body["identity"] = {"type": "SystemAssigned"}
+        body["location"] = location
+    elif identity_type == "UserAssigned":
+        body["identity"] = {
+            "type": "UserAssigned",
+            "userAssignedIdentities": {user_assigned_identity_id: {}},
+        }
+        body["location"] = location
+
     result = _put(url, body)
     props = result.get("properties", {})
-    return (
-        f"Policy assignment '{props.get('displayName', result['name'])}' created.\n"
-        f"  Scope: {props.get('scope', 'n/a')}\n"
-        f"  Enforcement: {props.get('enforcementMode', 'n/a')}"
-    )
+    identity = result.get("identity", {})
+    identity_type_out = identity.get("type", "None")
+
+    lines = [
+        f"Policy assignment '{props.get('displayName', result['name'])}' created.",
+        f"  Scope:       {props.get('scope', 'n/a')}",
+        f"  Enforcement: {props.get('enforcementMode', 'n/a')}",
+    ]
+    if identity_type_out != "None":
+        lines.append(f"  Identity:    {identity_type_out}")
+        if identity_type_out == "SystemAssigned":
+            lines.append(f"  Principal ID: {identity.get('principalId', 'n/a')}")
+    return "\n".join(lines)
 
 
 def _delete_policy_assignment(subscription_id: str, scope: str, assignment_name: str) -> str:
@@ -549,7 +577,11 @@ TOOLS = [
         name="create_policy_assignment",
         description=(
             "Assign a policy or initiative to a scope. "
-            "Use enforcement_mode='DoNotEnforce' for audit-only."
+            "Use enforcement_mode='DoNotEnforce' for audit-only. "
+            "Policies with 'deployIfNotExists' or 'modify' effects require a managed identity — "
+            "set identity_type to 'SystemAssigned' or 'UserAssigned' and provide a location. "
+            "After creating an assignment with a system-assigned identity, grant it the appropriate "
+            "role (e.g. Contributor) using create_role_assignment with the returned principal ID."
         ),
         input_schema={
             "type": "object",
@@ -562,6 +594,20 @@ TOOLS = [
                 "enforcement_mode": {"type": "string", "enum": ["Default", "DoNotEnforce"], "default": "Default"},
                 "description": {"type": "string", "default": ""},
                 "parameters_json": {"type": "string", "default": "{}"},
+                "identity_type": {
+                    "type": "string",
+                    "enum": ["None", "SystemAssigned", "UserAssigned"],
+                    "default": "None",
+                    "description": "Managed identity type to attach to the assignment. Required for deployIfNotExists and modify policies.",
+                },
+                "user_assigned_identity_id": {
+                    "type": "string",
+                    "description": "Full ARM resource ID of the user-assigned managed identity. Required when identity_type is 'UserAssigned'.",
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Azure region for the assignment, e.g. eastus. Required when identity_type is not 'None'.",
+                },
             },
             "required": ["subscription_id", "assignment_name", "display_name", "policy_definition_id", "scope"],
         },

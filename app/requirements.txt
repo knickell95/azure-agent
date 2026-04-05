@@ -9,6 +9,8 @@ azure-mgmt-authorization>=4.0.0
 # azure-mgmt-policyinsights dropped — all versions require 'six' (py2 compat shim).
 # Compliance queries use the Policy Insights REST API directly instead.
 azure-mgmt-subscription>=3.0.0
+azure-mgmt-monitor>=7.0.0
+azure-mgmt-msi>=7.0.0
 python-dotenv>=1.0.0
 requests>=2.32.0
 fastapi>=0.115.0

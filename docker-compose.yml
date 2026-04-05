@@ -1,6 +1,9 @@
+name: azure
+
 services:
-  azure-agent:
+  agent:
     build: .
+    image: azure-agent
     ports:
       - "8080:8080"
     environment:
