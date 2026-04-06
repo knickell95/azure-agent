@@ -1,30 +1,79 @@
-"""Tools for Azure Monitor Diagnostic Settings."""
-from azure.mgmt.monitor import MonitorManagementClient
+"""Tools for Azure Monitor Diagnostic Settings.
+
+Diagnostic settings are not exposed by azure-mgmt-monitor v5+.
+All operations use the ARM REST API directly via the microsoft.insights
+provider, following the same pattern as tools/policy.py.
+"""
+import requests
 from config import credential
 from tools.base import Tool
 
+_ARM_BASE = "https://management.azure.com"
+_DIAG_API = "2021-05-01-preview"
 
-def _client(subscription_id: str) -> MonitorManagementClient:
-    return MonitorManagementClient(credential, subscription_id)
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _token() -> str:
+    return credential.get_token("https://management.azure.com/.default").token
+
+
+def _headers() -> dict:
+    return {"Authorization": f"Bearer {_token()}", "Content-Type": "application/json"}
+
+
+def _get(url: str) -> dict:
+    resp = requests.get(url, headers=_headers(), timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _put(url: str, body: dict) -> dict:
+    resp = requests.put(url, headers=_headers(), json=body, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _delete_req(url: str) -> None:
+    resp = requests.delete(url, headers=_headers(), timeout=30)
+    resp.raise_for_status()
+
+
+def _diag_url(resource_id: str, setting_name: str | None = None) -> str:
+    base = f"{_ARM_BASE}{resource_id}/providers/microsoft.insights/diagnosticSettings"
+    if setting_name:
+        return f"{base}/{setting_name}?api-version={_DIAG_API}"
+    return f"{base}?api-version={_DIAG_API}"
+
+
+# ---------------------------------------------------------------------------
+# Functions
+# ---------------------------------------------------------------------------
 
 def _list_diagnostic_settings(subscription_id: str, resource_id: str) -> str:
-    settings = list(_client(subscription_id).diagnostic_settings.list(resource_id))
+    data = _get(_diag_url(resource_id))
+    settings = data.get("value", [])
     if not settings:
         return f"No diagnostic settings found on resource '{resource_id}'."
     lines = []
     for s in settings:
+        props = s.get("properties", {})
         destinations = []
-        if s.workspace_id:
-            destinations.append(f"log-analytics={s.workspace_id.split('/')[-1]}")
-        if s.storage_account_id:
-            destinations.append(f"storage={s.storage_account_id.split('/')[-1]}")
-        if s.event_hub_name:
-            destinations.append(f"event-hub={s.event_hub_name}")
+        if props.get("workspaceId"):
+            destinations.append(f"log-analytics={props['workspaceId'].split('/')[-1]}")
+        if props.get("storageAccountId"):
+            destinations.append(f"storage={props['storageAccountId'].split('/')[-1]}")
+        if props.get("eventHubName"):
+            destinations.append(f"event-hub={props['eventHubName']}")
         dest_str = ", ".join(destinations) if destinations else "no destinations"
-        log_count = len(s.logs or [])
-        metric_count = len(s.metrics or [])
-        lines.append(f"- {s.name}  logs={log_count}  metrics={metric_count}  destinations=[{dest_str}]")
+        log_count = len(props.get("logs", []))
+        metric_count = len(props.get("metrics", []))
+        lines.append(
+            f"- {s['name']}  logs={log_count}  metrics={metric_count}  "
+            f"destinations=[{dest_str}]"
+        )
     return "\n".join(lines)
 
 
@@ -33,36 +82,42 @@ def _get_diagnostic_setting(
     resource_id: str,
     setting_name: str,
 ) -> str:
-    s = _client(subscription_id).diagnostic_settings.get(resource_id, setting_name)
+    s = _get(_diag_url(resource_id, setting_name))
+    props = s.get("properties", {})
 
-    lines = [f"Diagnostic setting: {s.name}"]
+    lines = [f"Diagnostic setting: {s['name']}"]
 
-    if s.workspace_id:
-        lines.append(f"  Log Analytics workspace: {s.workspace_id}")
-    if s.storage_account_id:
-        lines.append(f"  Storage account:         {s.storage_account_id}")
-    if s.event_hub_authorization_rule_id:
-        lines.append(f"  Event Hub auth rule:      {s.event_hub_authorization_rule_id}")
-    if s.event_hub_name:
-        lines.append(f"  Event Hub:               {s.event_hub_name}")
+    if props.get("workspaceId"):
+        lines.append(f"  Log Analytics workspace: {props['workspaceId']}")
+    if props.get("storageAccountId"):
+        lines.append(f"  Storage account:         {props['storageAccountId']}")
+    if props.get("eventHubAuthorizationRuleId"):
+        lines.append(f"  Event Hub auth rule:      {props['eventHubAuthorizationRuleId']}")
+    if props.get("eventHubName"):
+        lines.append(f"  Event Hub:               {props['eventHubName']}")
 
-    if s.logs:
-        lines.append(f"\n  Log categories ({len(s.logs)}):")
-        for log in s.logs:
-            enabled = "enabled" if log.enabled else "disabled"
+    logs = props.get("logs", [])
+    if logs:
+        lines.append(f"\n  Log categories ({len(logs)}):")
+        for log in logs:
+            enabled = "enabled" if log.get("enabled") else "disabled"
+            category = log.get("category") or log.get("categoryGroup", "n/a")
             retention = ""
-            if log.retention_policy and log.retention_policy.enabled:
-                retention = f"  retention={log.retention_policy.days}d"
-            lines.append(f"    - {log.category or log.category_group}  {enabled}{retention}")
+            rp = log.get("retentionPolicy", {})
+            if rp.get("enabled"):
+                retention = f"  retention={rp['days']}d"
+            lines.append(f"    - {category}  {enabled}{retention}")
 
-    if s.metrics:
-        lines.append(f"\n  Metric categories ({len(s.metrics)}):")
-        for m in s.metrics:
-            enabled = "enabled" if m.enabled else "disabled"
+    metrics = props.get("metrics", [])
+    if metrics:
+        lines.append(f"\n  Metric categories ({len(metrics)}):")
+        for m in metrics:
+            enabled = "enabled" if m.get("enabled") else "disabled"
             retention = ""
-            if m.retention_policy and m.retention_policy.enabled:
-                retention = f"  retention={m.retention_policy.days}d"
-            lines.append(f"    - {m.category}  {enabled}{retention}")
+            rp = m.get("retentionPolicy", {})
+            if rp.get("enabled"):
+                retention = f"  retention={rp['days']}d"
+            lines.append(f"    - {m.get('category', 'n/a')}  {enabled}{retention}")
 
     return "\n".join(lines)
 
@@ -87,44 +142,40 @@ def _create_or_update_diagnostic_setting(
 
     logs = []
     if enable_all_logs:
-        logs.append({"category_group": "allLogs", "enabled": True, "retention_policy": retention_policy})
+        logs.append({"categoryGroup": "allLogs", "enabled": True, "retentionPolicy": retention_policy})
     elif log_categories:
         for cat in log_categories:
-            logs.append({"category": cat, "enabled": True, "retention_policy": retention_policy})
+            logs.append({"category": cat, "enabled": True, "retentionPolicy": retention_policy})
 
     metrics = []
     for cat in (metric_categories or []):
-        metrics.append({"category": cat, "enabled": True, "retention_policy": retention_policy})
+        metrics.append({"category": cat, "enabled": True, "retentionPolicy": retention_policy})
 
-    params = {
-        "logs": logs,
-        "metrics": metrics,
-    }
+    props: dict = {"logs": logs, "metrics": metrics}
     if workspace_id:
-        params["workspace_id"] = workspace_id
+        props["workspaceId"] = workspace_id
     if storage_account_id:
-        params["storage_account_id"] = storage_account_id
+        props["storageAccountId"] = storage_account_id
     if event_hub_authorization_rule_id:
-        params["event_hub_authorization_rule_id"] = event_hub_authorization_rule_id
+        props["eventHubAuthorizationRuleId"] = event_hub_authorization_rule_id
     if event_hub_name:
-        params["event_hub_name"] = event_hub_name
+        props["eventHubName"] = event_hub_name
 
-    s = _client(subscription_id).diagnostic_settings.create_or_update(
-        resource_id, setting_name, params
-    )
+    result = _put(_diag_url(resource_id, setting_name), {"properties": props})
+    rprops = result.get("properties", {})
 
     destinations = []
-    if s.workspace_id:
-        destinations.append(f"log-analytics={s.workspace_id.split('/')[-1]}")
-    if s.storage_account_id:
-        destinations.append(f"storage={s.storage_account_id.split('/')[-1]}")
-    if s.event_hub_name:
-        destinations.append(f"event-hub={s.event_hub_name}")
+    if rprops.get("workspaceId"):
+        destinations.append(f"log-analytics={rprops['workspaceId'].split('/')[-1]}")
+    if rprops.get("storageAccountId"):
+        destinations.append(f"storage={rprops['storageAccountId'].split('/')[-1]}")
+    if rprops.get("eventHubName"):
+        destinations.append(f"event-hub={rprops['eventHubName']}")
 
     return (
-        f"Diagnostic setting '{s.name}' saved on resource '{resource_id}'.\n"
+        f"Diagnostic setting '{result['name']}' saved on resource '{resource_id}'.\n"
         f"  Destinations: {', '.join(destinations)}\n"
-        f"  Logs: {len(s.logs or [])}  Metrics: {len(s.metrics or [])}"
+        f"  Logs: {len(rprops.get('logs', []))}  Metrics: {len(rprops.get('metrics', []))}"
     )
 
 
@@ -133,9 +184,13 @@ def _delete_diagnostic_setting(
     resource_id: str,
     setting_name: str,
 ) -> str:
-    _client(subscription_id).diagnostic_settings.delete(resource_id, setting_name)
+    _delete_req(_diag_url(resource_id, setting_name))
     return f"Diagnostic setting '{setting_name}' has been deleted from resource '{resource_id}'."
 
+
+# ---------------------------------------------------------------------------
+# Tool definitions
+# ---------------------------------------------------------------------------
 
 TOOLS = [
     Tool(
