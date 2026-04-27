@@ -50,15 +50,20 @@ ALL_TOOLS = [t for tools in TOOL_GROUPS.values() for t in tools]
 TOOL_REGISTRY: dict = {tool.name: tool for tool in ALL_TOOLS}
 
 
-def definitions_for_groups(group_names: list[str]) -> list[dict]:
-    """Return Anthropic tool definitions for core + the requested groups.
+def definitions_for_groups(group_names: list[str], provider: str = "anthropic") -> list[dict]:
+    """Return tool definitions for core + the requested groups.
 
-    Adds cache_control to the last definition so the tool list is cached.
+    For Anthropic: uses the native definition format and adds cache_control to
+    the last entry so the tool list is prompt-cached.
+    For OpenAI: uses the function-call format; no cache_control.
     """
     selected: list = list(TOOL_GROUPS["core"])
     for name in group_names:
         if name in TOOL_GROUPS and name != "core":
             selected.extend(TOOL_GROUPS[name])
+
+    if provider == "openai":
+        return [t.openai_definition for t in selected]
 
     defs = [t.definition for t in selected]
     if defs:

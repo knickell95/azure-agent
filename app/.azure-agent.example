@@ -17,5 +17,16 @@
 # Optional: set a default subscription so the agent doesn't have to ask every time
 # AZURE_DEFAULT_SUBSCRIPTION_ID=
 
-# Anthropic API key
+# Anthropic API key (used when AI_PROVIDER=anthropic, which is the default)
 ANTHROPIC_API_KEY=
+
+# ---------------------------------------------------------------------------
+# Azure AI Foundry / Azure OpenAI (set AI_PROVIDER=openai to use these)
+# Run `terraform output -raw app_env_vars` after deploying the Terraform
+# config in /terraform to get pre-filled values for the block below.
+# ---------------------------------------------------------------------------
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=
+# OPENAI_BASE_URL=https://<account>.openai.azure.com/
+# OPENAI_API_VERSION=2024-10-21
+# OPENAI_DEPLOYMENT_NAME=gpt-4o

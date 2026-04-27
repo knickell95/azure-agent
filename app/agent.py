@@ -2,12 +2,22 @@
 import json
 import time
 import anthropic
+import openai
 from prompts import SYSTEM_PROMPT
 from tools import TOOL_REGISTRY, GROUP_DESCRIPTIONS, definitions_for_groups
-from config import DEFAULT_SUBSCRIPTION_ID
+from config import (
+    DEFAULT_SUBSCRIPTION_ID,
+    AI_PROVIDER,
+    OPENAI_API_KEY,
+    OPENAI_BASE_URL,
+    OPENAI_API_VERSION,
+    OPENAI_DEPLOYMENT_NAME,
+)
 
-MODEL = "claude-opus-4-6"
-CLASSIFIER_MODEL = "claude-haiku-4-5"
+ANTHROPIC_MODEL = "claude-opus-4-6"
+ANTHROPIC_CLASSIFIER_MODEL = "claude-haiku-4-5"
+OPENAI_MODEL = "gpt-4o"
+OPENAI_CLASSIFIER_MODEL = "gpt-4o-mini"
 MAX_TOKENS = 4096
 
 _CACHED_SYSTEM = [
@@ -24,20 +34,28 @@ _CLASSIFIER_SYSTEM = (
 
 class AzureAgent:
     def __init__(self) -> None:
-        self.client = anthropic.Anthropic()
-        self.messages: list[dict] = []
-        # Track active groups across turns so follow-up questions keep context.
-        # E.g. "now show me the disks" after a VM question keeps "compute" active.
-        self._active_groups: set[str] = set()
-        self._build_initial_context()
+        self._provider = AI_PROVIDER
+        if self._provider == "openai":
+            if OPENAI_BASE_URL:
+                self.client = openai.AzureOpenAI(
+                    azure_endpoint=OPENAI_BASE_URL,
+                    api_key=OPENAI_API_KEY or None,
+                    api_version=OPENAI_API_VERSION or "2024-10-21",
+                )
+            else:
+                self.client = openai.OpenAI(api_key=OPENAI_API_KEY or None)
+            self._model = OPENAI_DEPLOYMENT_NAME or OPENAI_MODEL
+            self._classifier_model = OPENAI_CLASSIFIER_MODEL
+        else:
+            self.client = anthropic.Anthropic()
+            self._model = ANTHROPIC_MODEL
+            self._classifier_model = ANTHROPIC_CLASSIFIER_MODEL
 
-    def _build_initial_context(self) -> None:
-        """If a default subscription is configured, inject it via the system prompt
-        rather than history messages, so it doesn't consume history token budget."""
-        pass  # handled by SYSTEM_PROMPT + config.DEFAULT_SUBSCRIPTION_ID injection below
+        self.messages: list[dict] = []
+        self._active_groups: set[str] = set()
 
     def _classify_groups(self, user_input: str) -> set[str]:
-        """Use Haiku to pick which tool groups the request needs."""
+        """Use a fast/cheap model to pick which tool groups the request needs."""
         group_list = "\n".join(
             f"- {name}: {desc}" for name, desc in GROUP_DESCRIPTIONS.items()
         )
@@ -47,29 +65,38 @@ class AzureAgent:
             "Which groups are needed? Return a JSON array of group names."
         )
         try:
-            resp = self.client.messages.create(
-                model=CLASSIFIER_MODEL,
-                max_tokens=64,
-                system=_CLASSIFIER_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = next((b.text for b in resp.content if b.type == "text"), "[]")
+            if self._provider == "openai":
+                resp = self.client.chat.completions.create(
+                    model=self._classifier_model,
+                    max_tokens=64,
+                    messages=[
+                        {"role": "system", "content": _CLASSIFIER_SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+                text = resp.choices[0].message.content or "[]"
+            else:
+                resp = self.client.messages.create(
+                    model=self._classifier_model,
+                    max_tokens=64,
+                    system=_CLASSIFIER_SYSTEM,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = next((b.text for b in resp.content if b.type == "text"), "[]")
             groups = json.loads(text)
             return {g for g in groups if g in GROUP_DESCRIPTIONS}
         except Exception:
-            # On any failure, fall back to all groups
             return set(GROUP_DESCRIPTIONS.keys())
 
     def chat(self, user_input: str) -> str:
         """Send a user message and return the final assistant response."""
-        # Classify which groups this turn needs, then union with active groups
-        # so follow-up questions retain context from the previous turn.
         new_groups = self._classify_groups(user_input)
         self._active_groups |= new_groups
 
-        tool_defs = definitions_for_groups(list(self._active_groups))
+        tool_defs = definitions_for_groups(
+            list(self._active_groups), provider=self._provider
+        )
 
-        # Inject default subscription context into the first user message if set
         if not self.messages and DEFAULT_SUBSCRIPTION_ID:
             user_input = (
                 f"[Default subscription: {DEFAULT_SUBSCRIPTION_ID}] {user_input}"
@@ -79,50 +106,103 @@ class AzureAgent:
 
         while True:
             response = self._create_with_retry(tool_defs)
-            self.messages.append({"role": "assistant", "content": response.content})
 
-            if response.stop_reason == "end_turn":
-                return next(
-                    (b.text for b in response.content if b.type == "text"),
-                    "(no text response)",
-                )
+            if self._provider == "openai":
+                choice = response.choices[0]
+                message = choice.message
+                stop_reason = choice.finish_reason
 
-            if response.stop_reason != "tool_use":
-                return f"[Unexpected stop reason: {response.stop_reason}]"
+                assistant_msg: dict = {"role": "assistant", "content": message.content}
+                if message.tool_calls:
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ]
+                self.messages.append(assistant_msg)
 
-            tool_results = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-                result = self._execute_tool(block.name, block.input)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result,
-                })
+                if stop_reason == "stop":
+                    return message.content or "(no text response)"
 
-            self.messages.append({"role": "user", "content": tool_results})
+                if stop_reason != "tool_calls":
+                    return f"[Unexpected stop reason: {stop_reason}]"
 
-    def _create_with_retry(
-        self, tool_defs: list[dict], max_retries: int = 5
-    ) -> anthropic.types.Message:
-        """Call messages.create with exponential backoff on rate limit errors."""
+                for tc in message.tool_calls:
+                    tool_input = json.loads(tc.function.arguments)
+                    result = self._execute_tool(tc.function.name, tool_input)
+                    self.messages.append(
+                        {"role": "tool", "tool_call_id": tc.id, "content": result}
+                    )
+
+            else:  # anthropic
+                self.messages.append({"role": "assistant", "content": response.content})
+
+                if response.stop_reason == "end_turn":
+                    return next(
+                        (b.text for b in response.content if b.type == "text"),
+                        "(no text response)",
+                    )
+
+                if response.stop_reason != "tool_use":
+                    return f"[Unexpected stop reason: {response.stop_reason}]"
+
+                tool_results = []
+                for block in response.content:
+                    if block.type != "tool_use":
+                        continue
+                    result = self._execute_tool(block.name, block.input)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    })
+                self.messages.append({"role": "user", "content": tool_results})
+
+    def _create_with_retry(self, tool_defs: list[dict], max_retries: int = 5):
+        """Call the model API with exponential backoff on rate limit errors."""
+        rate_limit_exc = (
+            openai.RateLimitError if self._provider == "openai"
+            else anthropic.RateLimitError
+        )
         delay = 10.0
         for attempt in range(max_retries):
             try:
-                return self.client.messages.create(
-                    model=MODEL,
-                    max_tokens=MAX_TOKENS,
-                    system=_CACHED_SYSTEM,
-                    tools=tool_defs,
-                    messages=self.messages,
-                )
-            except anthropic.RateLimitError as exc:
+                if self._provider == "openai":
+                    messages_with_system = [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        *self.messages,
+                    ]
+                    return self.client.chat.completions.create(
+                        model=self._model,
+                        max_tokens=MAX_TOKENS,
+                        tools=tool_defs,
+                        messages=messages_with_system,
+                    )
+                else:
+                    return self.client.messages.create(
+                        model=self._model,
+                        max_tokens=MAX_TOKENS,
+                        system=_CACHED_SYSTEM,
+                        tools=tool_defs,
+                        messages=self.messages,
+                    )
+            except rate_limit_exc as exc:
                 if attempt == max_retries - 1:
                     raise
-                retry_after = exc.response.headers.get("retry-after")
+                retry_after = None
+                if hasattr(exc, "response") and exc.response is not None:
+                    retry_after = exc.response.headers.get("retry-after")
                 wait = float(retry_after) if retry_after else delay
-                print(f"\n[rate limited — waiting {wait:.0f}s before retry {attempt + 1}/{max_retries}]")
+                print(
+                    f"\n[rate limited — waiting {wait:.0f}s before retry "
+                    f"{attempt + 1}/{max_retries}]"
+                )
                 time.sleep(wait)
                 delay = min(delay * 2, 120.0)
 

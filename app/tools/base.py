@@ -23,6 +23,17 @@ class Tool:
             "input_schema": self.input_schema,
         }
 
+    @property
+    def openai_definition(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.input_schema,
+            },
+        }
+
     def execute(self, **kwargs: Any) -> str:
         try:
             return self.func(**kwargs)

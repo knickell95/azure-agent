@@ -310,6 +310,38 @@ docker compose up --build
 
 Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
+### Deploying a model with Terraform
+
+The `terraform/` directory contains configuration to deploy an **Azure AI Foundry Hub and Project** with an **Azure OpenAI model deployment** (default: `gpt-4o`).
+
+**Resources created:**
+- Resource group
+- Storage account and Key Vault (required by AI Foundry Hub)
+- Azure AI Foundry Hub and Project
+- Azure OpenAI account with a model deployment
+- Connection between the OpenAI account and the Hub (visible in the AI Foundry portal)
+- RBAC role assignments for managed identities
+
+**Deploy:**
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars to set your preferred region and model
+terraform init
+terraform apply
+```
+
+**Configure the app** after a successful apply:
+
+```bash
+terraform output -raw app_env_vars >> ../app/.azure-agent
+```
+
+This appends the `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_API_VERSION`, and `OPENAI_DEPLOYMENT_NAME` variables directly to your config file.
+
+**Required permissions to deploy:** the principal running `terraform apply` needs `Contributor` + `User Access Administrator` on the target subscription (or a custom role with `Microsoft.Authorization/roleAssignments/write`), as the configuration creates RBAC role assignments.
+
 ### Running locally (without Docker)
 
 ```bash

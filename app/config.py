@@ -1,6 +1,15 @@
 import os
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 
+# AI provider — "anthropic" (default) or "openai"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
+
+# OpenAI / Azure OpenAI settings (used when AI_PROVIDER=openai)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+OPENAI_API_VERSION = os.getenv("OPENAI_API_VERSION", "")
+OPENAI_DEPLOYMENT_NAME = os.getenv("OPENAI_DEPLOYMENT_NAME", "")
+
 
 def _build_credential():
     """Return the appropriate credential based on environment configuration.
