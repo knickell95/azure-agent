@@ -84,30 +84,6 @@ module containerApps 'modules/container-apps.bicep' = {
   }
 }
 
-// ── Agent Azure Permissions ─────────────────────────────────────────────────
-// Grant the Container App's managed identity Contributor on this subscription
-// so the agent can manage Azure resources on your behalf.
-//
-// Scope this down to specific resource groups if you want to limit blast radius,
-// or use a custom role if you need read-only access for some tool categories.
-//
-// Note: the identity.py and entra.py tools may need additional permissions
-// (User Access Administrator, Directory Reader) configured separately.
-
-resource agentContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  // Use stable, start-time-calculable inputs for the name so Bicep can resolve it
-  // before modules complete. The principalId is used only in properties, which is fine.
-  name: guid(subscription().id, resourceGroupName, 'id-azure-agent', 'contributor')
-  properties: {
-    roleDefinitionId: subscriptionResourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      'b24988ac-6180-42a0-ab88-20f7382dd24c' // Contributor
-    )
-    principalId: identity.outputs.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 // ── Outputs ─────────────────────────────────────────────────────────────────
 
 output resourceGroupName string = resourceGroupName

@@ -40,7 +40,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     ]
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false // Set to true for production workloads
+    enablePurgeProtection: true // Irreversible once set; matches existing vault state
     publicNetworkAccess: 'Enabled'
   }
   tags: {

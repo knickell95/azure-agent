@@ -15,9 +15,12 @@
 #          "audiences": ["api://AzureADTokenExchange"]
 #        }'
 #
-# 3. Grant the service principal Contributor on your subscription:
+# 3. Grant the service principal Owner on your subscription (Owner is required so
+#    the pipeline can assign the Contributor role to the agent managed identity;
+#    if you prefer Contributor-only, run the agent role assignment manually once —
+#    see the "Grant agent managed identity" step below for the command):
 #      az role assignment create \
-#        --role Contributor \
+#        --role Owner \
 #        --assignee <appId> \
 #        --scope /subscriptions/<subscriptionId>
 #
@@ -112,6 +115,38 @@ jobs:
           echo "acr-login-server=$(echo "$OUTPUT" | jq -r '.properties.outputs.acrLoginServer.value')" >> $GITHUB_OUTPUT
           echo "container-app-name=$(echo "$OUTPUT" | jq -r '.properties.outputs.containerAppName.value')" >> $GITHUB_OUTPUT
           echo "container-app-url=$(echo "$OUTPUT" | jq -r '.properties.outputs.containerAppUrl.value')" >> $GITHUB_OUTPUT
+          echo "mi-principal-id=$(echo "$OUTPUT" | jq -r '.properties.outputs.managedIdentityPrincipalId.value')" >> $GITHUB_OUTPUT
+
+      - name: Grant agent managed identity Contributor on subscription
+        # Requires the deploying service principal to have Owner or User Access
+        # Administrator on the subscription (Contributor alone cannot write role
+        # assignments). If the SP only has Contributor, run this once manually:
+        #   az role assignment create \
+        #     --role Contributor \
+        #     --assignee <managedIdentityPrincipalId> \
+        #     --scope /subscriptions/<subscriptionId>
+        run: |
+          MI_PRINCIPAL_ID="${{ steps.deploy.outputs.mi-principal-id }}"
+          SCOPE="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          CONTRIBUTOR="b24988ac-6180-42a0-ab88-20f7382dd24c"
+
+          # Idempotent: skip if the assignment already exists
+          EXISTING=$(az role assignment list \
+            --assignee "$MI_PRINCIPAL_ID" \
+            --role "$CONTRIBUTOR" \
+            --scope "$SCOPE" \
+            --query "[0].id" -o tsv 2>/dev/null || true)
+
+          if [ -z "$EXISTING" ]; then
+            az role assignment create \
+              --assignee-object-id "$MI_PRINCIPAL_ID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "$CONTRIBUTOR" \
+              --scope "$SCOPE"
+            echo "Contributor role assigned to agent managed identity."
+          else
+            echo "Contributor role already assigned — skipping."
+          fi
 
   # ── Job 2: Build and push container image ────────────────────────────────
   # Uses ACR Tasks to build the Docker image in Azure — no local Docker needed.
