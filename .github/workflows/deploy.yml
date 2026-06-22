@@ -1,0 +1,169 @@
+# Deploys the azure-agent stack to Azure using Bicep + Azure Container Apps.
+#
+# ── One-time setup ──────────────────────────────────────────────────────────
+# 1. Create an Entra ID app registration and service principal:
+#      az ad app create --display-name "azure-agent-cicd"
+#      az ad sp create --id <appId>
+#
+# 2. Add a federated credential for this repository:
+#      az ad app federated-credential create \
+#        --id <appId> \
+#        --parameters '{
+#          "name": "github-deploy",
+#          "issuer": "https://token.actions.githubusercontent.com",
+#          "subject": "repo:<org>/<repo>:ref:refs/heads/main",
+#          "audiences": ["api://AzureADTokenExchange"]
+#        }'
+#
+# 3. Grant the service principal Contributor on your subscription:
+#      az role assignment create \
+#        --role Contributor \
+#        --assignee <appId> \
+#        --scope /subscriptions/<subscriptionId>
+#
+# 4. Register the Microsoft.App resource provider if not already done:
+#      az provider register --namespace Microsoft.App --wait
+#
+# 5. Add these GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#      AZURE_CLIENT_ID       — the app registration's Application (client) ID
+#      AZURE_TENANT_ID       — your Azure tenant ID
+#      AZURE_SUBSCRIPTION_ID — the subscription to deploy into
+#      ANTHROPIC_API_KEY     — your Anthropic API key (stored in Key Vault)
+# ────────────────────────────────────────────────────────────────────────────
+
+name: Deploy
+
+on:
+  push:
+    branches: [main, azure-openai]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # Required for OIDC token exchange
+  contents: read
+
+env:
+  LOCATION: westus2
+  RESOURCE_GROUP: rg-azure-agent
+
+jobs:
+  # ── Job 1: Deploy infrastructure ─────────────────────────────────────────
+  # Creates the resource group, ACR, Key Vault, Container Apps Environment,
+  # and Container App (initially running a placeholder image).
+  infra:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    outputs:
+      acr-name: ${{ steps.deploy.outputs.acr-name }}
+      acr-login-server: ${{ steps.deploy.outputs.acr-login-server }}
+      container-app-name: ${{ steps.deploy.outputs.container-app-name }}
+      container-app-url: ${{ steps.deploy.outputs.container-app-url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get deployer object ID
+        id: deployer
+        run: |
+          OBJ_ID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID }}" --query id -o tsv)
+          echo "object-id=$OBJ_ID" >> $GITHUB_OUTPUT
+
+      - name: Write deployment parameters
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          jq -n \
+            --arg key "$ANTHROPIC_API_KEY" \
+            --arg oid "${{ steps.deployer.outputs.object-id }}" \
+            '{
+              "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+              "contentVersion": "1.0.0.0",
+              "parameters": {
+                "anthropicApiKey": { "value": $key },
+                "deployerObjectId": { "value": $oid }
+              }
+            }' > /tmp/deploy-params.json
+
+      - name: Deploy Bicep
+        id: deploy
+        run: |
+          OUTPUT=$(az deployment sub create \
+            --location "$LOCATION" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam \
+            --parameters @/tmp/deploy-params.json \
+            --output json)
+
+          echo "acr-name=$(echo "$OUTPUT" | jq -r '.properties.outputs.acrName.value')" >> $GITHUB_OUTPUT
+          echo "acr-login-server=$(echo "$OUTPUT" | jq -r '.properties.outputs.acrLoginServer.value')" >> $GITHUB_OUTPUT
+          echo "container-app-name=$(echo "$OUTPUT" | jq -r '.properties.outputs.containerAppName.value')" >> $GITHUB_OUTPUT
+          echo "container-app-url=$(echo "$OUTPUT" | jq -r '.properties.outputs.containerAppUrl.value')" >> $GITHUB_OUTPUT
+
+  # ── Job 2: Build and push container image ────────────────────────────────
+  # Uses ACR Tasks to build the Docker image in Azure — no local Docker needed.
+  build-push:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    needs: infra
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push via ACR Tasks
+        id: build
+        run: |
+          ACR_NAME="${{ needs.infra.outputs.acr-name }}"
+          IMAGE_TAG="${{ needs.infra.outputs.acr-login-server }}/azure-agent:${{ github.sha }}"
+
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "azure-agent:${{ github.sha }}" \
+            --image "azure-agent:latest" \
+            .
+
+          echo "image=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ── Job 3: Update the Container App ─────────────────────────────────────
+  # Sets the Container App to the newly pushed image. The infra job deploys
+  # the app with a placeholder image; this step always replaces it with the
+  # real build so the two steps stay decoupled.
+  update-app:
+    name: Update Container App
+    runs-on: ubuntu-latest
+    needs: [infra, build-push]
+
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Container App image
+        run: |
+          az containerapp update \
+            --name "${{ needs.infra.outputs.container-app-name }}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${{ needs.build-push.outputs.image }}"
+
+      - name: Print app URL
+        run: echo "App deployed to ${{ needs.infra.outputs.container-app-url }}"
