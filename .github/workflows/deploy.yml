@@ -80,13 +80,20 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          # Write all parameters into one JSON file. We can't combine a .bicepparam
+          # file with a JSON params file — Bicep validates the .bicepparam as complete
+          # before merging, which fails on the required secure parameters.
           jq -n \
             --arg key "$ANTHROPIC_API_KEY" \
             --arg oid "${{ steps.deployer.outputs.object-id }}" \
+            --arg loc "$LOCATION" \
+            --arg rg "$RESOURCE_GROUP" \
             '{
               "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
               "contentVersion": "1.0.0.0",
               "parameters": {
+                "location":        { "value": $loc },
+                "resourceGroupName": { "value": $rg },
                 "anthropicApiKey": { "value": $key },
                 "deployerObjectId": { "value": $oid }
               }
@@ -98,7 +105,6 @@ jobs:
           OUTPUT=$(az deployment sub create \
             --location "$LOCATION" \
             --template-file infra/main.bicep \
-            --parameters infra/main.bicepparam \
             --parameters @/tmp/deploy-params.json \
             --output json)
 
