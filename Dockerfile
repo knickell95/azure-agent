@@ -1,13 +1,15 @@
-FROM python:3.12-slim
+# Pin to bookworm (Debian 12) — Microsoft's apt repo does not yet have a
+# trixie (Debian 13) release, which is what python:3.12-slim now tracks.
+FROM python:3.12-slim-bookworm
 
 # Install Azure CLI via Microsoft's apt repo. Installing it via pip causes
 # the dependency resolver to backtrack through hundreds of azure-cli versions
 # when it is combined with the app's Azure SDK packages in a single pip solve.
-RUN apt-get update && apt-get install -y curl ca-certificates gnupg lsb-release \
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && curl -sLS https://packages.microsoft.com/keys/microsoft.asc \
        | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] \
-       https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" \
+       https://packages.microsoft.com/repos/azure-cli/ bookworm main" \
        > /etc/apt/sources.list.d/azure-cli.list \
     && apt-get update && apt-get install -y azure-cli \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
