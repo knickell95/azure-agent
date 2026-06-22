@@ -9,6 +9,9 @@ from tools.policy import TOOLS as _POLICY_TOOLS
 from tools.entra import TOOLS as _ENTRA_TOOLS
 from tools.monitor import TOOLS as _MONITOR_TOOLS
 from tools.managed_identity import TOOLS as _MANAGED_IDENTITY_TOOLS
+from tools.container_apps import TOOLS as _CONTAINER_APPS_TOOLS
+from tools.acr import TOOLS as _ACR_TOOLS
+from tools.keyvault import TOOLS as _KEYVAULT_TOOLS
 
 # ---------------------------------------------------------------------------
 # Tool groups — each value is a list of Tool objects for one service domain.
@@ -29,6 +32,9 @@ TOOL_GROUPS: dict[str, list] = {
     "entra":    _ENTRA_TOOLS,
     "monitor":          _MONITOR_TOOLS,
     "managed_identity": _MANAGED_IDENTITY_TOOLS,
+    "container_apps":   _CONTAINER_APPS_TOOLS,
+    "acr":              _ACR_TOOLS,
+    "keyvault":         _KEYVAULT_TOOLS,
 }
 
 # Short descriptions used by the Haiku classifier to pick groups.
@@ -42,6 +48,9 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "entra":    "Entra ID, Azure AD, users, groups, app registrations, service principals, devices, directory roles",
     "monitor":          "Azure Monitor, diagnostic settings, logs, metrics, Log Analytics workspace, Event Hub",
     "managed_identity": "managed identity, user-assigned identity, MSI, service identity, principal ID, client ID",
+    "container_apps":   "Container Apps, container app, container application, app revisions, restart container app, managed environment",
+    "acr":              "Azure Container Registry, ACR, container registry, Docker image, image tags, repositories, image list",
+    "keyvault":         "Key Vault, key vault secrets, Azure Key Vault, KV, secret management, vault secrets",
 }
 
 # Complete flat list and registry — used for tool execution lookup regardless
