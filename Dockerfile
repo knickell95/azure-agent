@@ -5,6 +5,11 @@ FROM python:3.12-slim-bookworm
 # Install Azure CLI via Microsoft's apt repo. Installing it via pip causes
 # the dependency resolver to backtrack through hundreds of azure-cli versions
 # when it is combined with the app's Azure SDK packages in a single pip solve.
+#
+# Side-effect: the azure-cli apt package deposits Azure SDK stub packages into
+# the system Python, which corrupts the azure.* namespace when pip then installs
+# the real azure-mgmt-* packages on top. A virtual environment for the app
+# packages prevents the two sets of packages from ever merging.
 RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && curl -sLS https://packages.microsoft.com/keys/microsoft.asc \
        | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
@@ -17,6 +22,8 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
 WORKDIR /app
 
 COPY app/requirements.txt .
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ .

@@ -12,6 +12,7 @@ from tools.managed_identity import TOOLS as _MANAGED_IDENTITY_TOOLS
 from tools.container_apps import TOOLS as _CONTAINER_APPS_TOOLS
 from tools.acr import TOOLS as _ACR_TOOLS
 from tools.keyvault import TOOLS as _KEYVAULT_TOOLS
+from tools.cost_management import TOOLS as _COST_MANAGEMENT_TOOLS
 
 # ---------------------------------------------------------------------------
 # Tool groups — each value is a list of Tool objects for one service domain.
@@ -35,6 +36,7 @@ TOOL_GROUPS: dict[str, list] = {
     "container_apps":   _CONTAINER_APPS_TOOLS,
     "acr":              _ACR_TOOLS,
     "keyvault":         _KEYVAULT_TOOLS,
+    "cost_management":  _COST_MANAGEMENT_TOOLS,
 }
 
 # Short descriptions used by the Haiku classifier to pick groups.
@@ -51,6 +53,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "container_apps":   "Container Apps, container app, container application, app revisions, restart container app, managed environment",
     "acr":              "Azure Container Registry, ACR, container registry, Docker image, image tags, repositories, image list",
     "keyvault":         "Key Vault, key vault secrets, Azure Key Vault, KV, secret management, vault secrets",
+    "cost_management":  "cost, spend, billing, budget, how much am I spending, cost breakdown, cost by service, cost by resource group, Azure Cost Management, monthly spend, daily spend",
 }
 
 # Complete flat list and registry — used for tool execution lookup regardless
