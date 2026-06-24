@@ -1,15 +1,19 @@
-"""Tools for Azure Monitor Diagnostic Settings.
+"""Tools for Azure Monitor — Diagnostic Settings and Activity Log.
 
-Diagnostic settings are not exposed by azure-mgmt-monitor v5+.
+Neither feature is exposed cleanly by azure-mgmt-monitor v5+.
 All operations use the ARM REST API directly via the microsoft.insights
 provider, following the same pattern as tools/policy.py.
 """
+import urllib.parse
+from datetime import datetime, timedelta, timezone
+
 import requests
 from config import credential
 from tools.base import Tool
 
 _ARM_BASE = "https://management.azure.com"
 _DIAG_API = "2021-05-01-preview"
+_ACTIVITY_API = "2015-04-01"
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +193,86 @@ def _delete_diagnostic_setting(
 
 
 # ---------------------------------------------------------------------------
+# Activity Log
+# ---------------------------------------------------------------------------
+
+def _list_activity_log(
+    subscription_id: str,
+    hours: int = 24,
+    resource_group: str | None = None,
+    resource_id: str | None = None,
+    caller: str | None = None,
+    status: str | None = None,
+    max_results: int = 50,
+) -> str:
+    now = datetime.now(timezone.utc)
+    start_str = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    filters = [f"eventTimestamp ge '{start_str}'"]
+    if resource_id:
+        filters.append(f"resourceId eq '{resource_id}'")
+    elif resource_group:
+        filters.append(f"resourceGroupName eq '{resource_group}'")
+    if caller:
+        filters.append(f"caller eq '{caller}'")
+    if status:
+        filters.append(f"status eq '{status}'")
+
+    url = (
+        f"{_ARM_BASE}/subscriptions/{subscription_id}"
+        f"/providers/microsoft.insights/eventtypes/management/values"
+        f"?api-version={_ACTIVITY_API}"
+        f"&$filter={urllib.parse.quote(' and '.join(filters))}"
+    )
+    entries = _get(url).get("value", [])
+
+    if not entries:
+        scope = (
+            f"resource '{resource_id.rstrip('/').split('/')[-1]}'" if resource_id
+            else f"resource group '{resource_group}'" if resource_group
+            else f"subscription {subscription_id}"
+        )
+        return f"No activity log entries in the last {hours}h for {scope}."
+
+    total = len(entries)
+    entries = entries[:max_results]
+
+    scope_label = (
+        f"resource '{resource_id.rstrip('/').split('/')[-1]}'" if resource_id
+        else f"resource group '{resource_group}'" if resource_group
+        else f"subscription {subscription_id}"
+    )
+    lines = [f"Activity log — last {hours}h, {scope_label} ({min(total, max_results)}/{total} entries shown):"]
+
+    for e in entries:
+        ts = e.get("eventTimestamp", "")[:19].replace("T", " ")
+        op_obj = e.get("operationName") or {}
+        op = op_obj.get("localizedValue") or op_obj.get("value", "n/a")
+        status_obj = e.get("status") or {}
+        status_str = status_obj.get("localizedValue") or status_obj.get("value", "n/a")
+        level = e.get("level", "")
+        caller_val = e.get("caller", "n/a")
+        rid = e.get("resourceId", "")
+        resource_name = rid.rstrip("/").split("/")[-1] if rid else ""
+
+        parts = [f"[{ts}]", status_str]
+        if level and level != "Informational":
+            parts.append(f"level={level}")
+        parts.append(op)
+        if resource_name:
+            parts.append(f"resource={resource_name}")
+        if not resource_group and not resource_id and e.get("resourceGroupName"):
+            parts.append(f"rg={e['resourceGroupName']}")
+        parts.append(f"caller={caller_val}")
+        lines.append("  " + "  ".join(parts))
+
+    if total > max_results:
+        lines.append(f"  ... {total - max_results} more entries not shown (increase max_results to see all)")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
 
@@ -298,5 +382,48 @@ TOOLS = [
         },
         func=_delete_diagnostic_setting,
         destructive=True,
+    ),
+    Tool(
+        name="list_activity_log",
+        description=(
+            "List Azure Monitor Activity Log entries for a subscription, resource group, or specific resource. "
+            "Shows who did what, when, and whether it succeeded or failed. "
+            "Useful for auditing changes, investigating failures, and tracking deployments. "
+            "Activity Log retains data for 90 days; requests beyond that will return no results."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "subscription_id": {"type": "string"},
+                "hours": {
+                    "type": "integer",
+                    "default": 24,
+                    "description": "How many hours back to look. Maximum 2160 (90 days). Defaults to 24.",
+                },
+                "resource_group": {
+                    "type": "string",
+                    "description": "Filter to a specific resource group. Ignored if resource_id is provided.",
+                },
+                "resource_id": {
+                    "type": "string",
+                    "description": "Filter to a specific resource. Full ARM resource ID, e.g. /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{name}.",
+                },
+                "caller": {
+                    "type": "string",
+                    "description": "Filter by the identity that performed the operation — a UPN (user@example.com) or service principal object ID.",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Filter by operation status. Common values: Succeeded, Failed, Accepted, Started, Canceled.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum number of entries to return. Defaults to 50.",
+                },
+            },
+            "required": ["subscription_id"],
+        },
+        func=_list_activity_log,
     ),
 ]

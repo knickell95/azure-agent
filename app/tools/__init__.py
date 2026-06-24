@@ -46,7 +46,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "identity": "RBAC, role assignments, role definitions, Azure permissions",
     "policy":   "Azure Policy, policy definitions, initiatives, assignments, compliance, remediation",
     "entra":    "Entra ID, Azure AD, users, groups, app registrations, service principals, devices, directory roles",
-    "monitor":          "Azure Monitor, diagnostic settings, logs, metrics, Log Analytics workspace, Event Hub",
+    "monitor":          "Azure Monitor, diagnostic settings, logs, metrics, Log Analytics workspace, Event Hub, activity log, audit log, who changed what, operation history",
     "managed_identity": "managed identity, user-assigned identity, MSI, service identity, principal ID, client ID",
     "container_apps":   "Container Apps, container app, container application, app revisions, restart container app, managed environment",
     "acr":              "Azure Container Registry, ACR, container registry, Docker image, image tags, repositories, image list",
